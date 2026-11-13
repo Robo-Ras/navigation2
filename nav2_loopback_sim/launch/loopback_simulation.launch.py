@@ -11,41 +11,34 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# [Humble port] Upstream defaults params_file to nav2_bringup/params/nav2_params.yaml.
+# nav2_bringup is not installed here, so params_file is optional.
 
-import os
-
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.conditions import IfCondition, UnlessCondition
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 
-def generate_launch_description() -> LaunchDescription:
-    bringup_dir = get_package_share_directory('nav2_bringup')
+def generate_launch_description():
     params_file = LaunchConfiguration('params_file')
-    declare_params_file_cmd = DeclareLaunchArgument(
-        'params_file',
-        default_value=os.path.join(bringup_dir, 'params', 'nav2_params.yaml'),
-        description='Full path to the ROS2 parameters file to use for all launched nodes',
-    )
-
     scan_frame_id = LaunchConfiguration('scan_frame_id')
-    declare_scan_frame_id_cmd = DeclareLaunchArgument(
-        'scan_frame_id',
-        default_value='base_scan',
-    )
+    has_params = PythonExpression(["'", params_file, "' != ''"])
 
-    loopback_sim_cmd = Node(
+    common = dict(
         package='nav2_loopback_sim',
         executable='loopback_simulator',
         name='loopback_simulator',
         output='screen',
-        parameters=[params_file, {'scan_frame_id': scan_frame_id}],
     )
-
-    ld = LaunchDescription()
-    ld.add_action(declare_scan_frame_id_cmd)
-    ld.add_action(declare_params_file_cmd)
-    ld.add_action(loopback_sim_cmd)
-    return ld
+    return LaunchDescription([
+        DeclareLaunchArgument('params_file', default_value='',
+                              description='Optional ROS 2 parameters file'),
+        DeclareLaunchArgument('scan_frame_id', default_value='base_scan'),
+        Node(**common, parameters=[params_file, {'scan_frame_id': scan_frame_id}],
+             condition=IfCondition(has_params)),
+        Node(**common, parameters=[{'scan_frame_id': scan_frame_id}],
+             condition=UnlessCondition(has_params)),
+    ])

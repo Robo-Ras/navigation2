@@ -1,5 +1,20 @@
 # Nav2 Loopback Simulation
 
+> **Humble port (Robo-Ras fork, branch `humble-ras-ports`).** This package runs on ROS 2 Humble /
+> Ubuntu 22.04 with only core ROS packages + numpy. Changes (marked `[Humble port]` in the code):
+>
+> - `tf_transformations` + `transforms3d` replaced by `nav2_loopback_sim/transformations.py` (numpy only)
+> - `nav2_simple_commander.line_iterator` vendored as `nav2_loopback_sim/line_iterator.py`, so the
+>   package builds alone (`colcon build --packages-select nav2_loopback_sim`)
+> - New parameters `set_initial_pose_on_start` (default `false`) and `initial_pose` (`[x, y, yaw]`):
+>   start localized without publishing `/initialpose`
+> - `odom` message frames use `odom_frame_id`/`base_frame_id` (were hardcoded `odom`/`base_link`)
+> - Missing laser TF logged at debug level and retried later, instead of an error every 100 ms
+> - Timer destroyed through `Node.destroy_timer()`; clean shutdown on Ctrl+C
+> - Launch file no longer depends on `nav2_bringup` (`params_file` is optional)
+>
+> Note: `enable_stamped_cmd_vel` defaults to `true` here (TwistStamped). Set it to `false` for `Twist`.
+
 The Nav2 loopback simulator is a stand-alone simulator to create a "loopback" for non-physical simulation to replace robot hardware, physics simulators (Gazebo, Bullet, Isaac Sim, etc). It computes the robot's odometry based on the command velocity's output request to create a perfect 'frictionless plane'-style simulation for unit testing, system testing, R&D on higher level systems, and testing behaviors without concerning yourself with localization accuracy or system dynamics.
 
 This was created by Steve Macenski of [Open Navigation LLC](https://opennav.org) and donated to Nav2 by the support of our project sponsors. If you rely on Nav2, please consider supporting the project!

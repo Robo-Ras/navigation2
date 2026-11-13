@@ -18,20 +18,22 @@ from typing import Optional
 
 from geometry_msgs.msg import (PoseWithCovarianceStamped, Quaternion, TransformStamped, Twist,
                                TwistStamped, Vector3)
-from nav2_simple_commander.line_iterator import LineIterator
 from nav_msgs.msg import Odometry
 from nav_msgs.srv import GetMap
 import numpy as np
 import rclpy
 from rclpy.duration import Duration
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.timer import Timer
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformBroadcaster, TransformListener
-import tf_transformations
 
+# [Humble port] local numpy replacements: no tf_transformations/transforms3d/nav2_simple_commander
+from . import transformations as tf_transformations
+from .line_iterator import LineIterator
 from .utils import (addYawToQuat, getMapOccupancy, matrixToTransform, transformStampedToMatrix,
                     worldToMap)
 
@@ -110,6 +112,15 @@ class LoopbackSimulator(Node):
         self.use_inf = \
             self.get_parameter('scan_use_inf').get_parameter_value().bool_value
 
+        # [Humble port] Start already localized at `initial_pose` (x, y, yaw in map frame)
+        # instead of waiting for an /initialpose message (e.g. RViz "2D Pose Estimate").
+        self.declare_parameter('set_initial_pose_on_start', False)
+        self.set_initial_pose_on_start = self.get_parameter(
+            'set_initial_pose_on_start').get_parameter_value().bool_value
+        self.declare_parameter('initial_pose', [0.0, 0.0, 0.0])
+        self.initial_pose_param = list(self.get_parameter(
+            'initial_pose').get_parameter_value().double_array_value)
+
         self.t_map_to_odom = TransformStamped()
         self.t_map_to_odom.header.frame_id = self.map_frame_id
         self.t_map_to_odom.child_frame_id = self.odom_frame_id
@@ -151,7 +162,31 @@ class LoopbackSimulator(Node):
 
         self.getMap()
 
+        self.autoInitTimer: Optional[Timer] = None
+        if self.set_initial_pose_on_start:
+            self.autoInitTimer = self.create_timer(0.5, self.autoInitialPoseCallback)
+
         self.info('Loopback simulator initialized')
+
+    def autoInitialPoseCallback(self) -> None:
+        # [Humble port] one-shot: behaves exactly like receiving /initialpose
+        if self.autoInitTimer is not None:
+            self.destroy_timer(self.autoInitTimer)
+            self.autoInitTimer = None
+        if self.initial_pose is not None:
+            return
+        x, y, yaw = (self.initial_pose_param + [0.0, 0.0, 0.0])[:3]
+        msg = PoseWithCovarianceStamped()
+        msg.header.frame_id = self.map_frame_id
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.pose.pose.position.x = float(x)
+        msg.pose.pose.position.y = float(y)
+        q = tf_transformations.quaternion_from_euler(0.0, 0.0, float(yaw))
+        msg.pose.pose.orientation.x = q[0]
+        msg.pose.pose.orientation.y = q[1]
+        msg.pose.pose.orientation.z = q[2]
+        msg.pose.pose.orientation.w = q[3]
+        self.initialPoseCallback(msg)
 
     def getBaseToLaserTf(self) -> None:
         try:
@@ -161,7 +196,8 @@ class LoopbackSimulator(Node):
             self.mat_base_to_laser = transformStampedToMatrix(transform)
 
         except Exception as ex:
-            self.get_logger().error(f'Transform lookup failed: {str(ex)}')
+            # [Humble port] debug instead of error: retried lazily from publishLaserScan
+            self.get_logger().debug(f'Transform lookup failed: {str(ex)}')
 
     def setupTimerCallback(self) -> None:
         # Publish initial identity odom transform & laser scan to warm up system
@@ -205,8 +241,7 @@ class LoopbackSimulator(Node):
 
             # Start republication timer and velocity processing
             if self.setupTimer is not None:
-                self.setupTimer.cancel()
-                self.setupTimer.destroy()
+                self.destroy_timer(self.setupTimer)  # [Humble port] remove from node too
                 self.setupTimer = None
             self.timer = self.create_timer(self.update_dur, self.timerCallback)
             self.timer_laser = self.create_timer(self.scan_publish_dur, self.publishLaserScan)
@@ -271,6 +306,8 @@ class LoopbackSimulator(Node):
             (self.scan_msg.angle_max - self.scan_msg.angle_min) /
             self.scan_msg.angle_increment)
         self.scan_msg.ranges = [0.0] * num_samples
+        if self.mat_base_to_laser is None and self.map is not None:
+            self.getBaseToLaserTf()  # [Humble port] retry after the setup phase
         self.getLaserScan(num_samples)
         self.scan_pub.publish(self.scan_msg)
 
@@ -286,8 +323,8 @@ class LoopbackSimulator(Node):
     def publishOdometry(self, odom_to_base_link: TransformStamped) -> None:
         odom = Odometry()
         odom.header.stamp = self.get_clock().now().to_msg()
-        odom.header.frame_id = 'odom'
-        odom.child_frame_id = 'base_link'
+        odom.header.frame_id = self.odom_frame_id  # [Humble port] was hardcoded 'odom'
+        odom.child_frame_id = self.base_frame_id  # [Humble port] was hardcoded 'base_link'
         odom.pose.pose.position.x = odom_to_base_link.transform.translation.x
         odom.pose.pose.position.y = odom_to_base_link.transform.translation.y
         odom.pose.pose.orientation = odom_to_base_link.transform.rotation
@@ -398,9 +435,12 @@ class LoopbackSimulator(Node):
 def main() -> None:
     rclpy.init()
     loopback_simulator = LoopbackSimulator()
-    rclpy.spin(loopback_simulator)
+    try:
+        rclpy.spin(loopback_simulator)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass  # [Humble port] clean Ctrl+C (Humble raises KeyboardInterrupt from spin)
     loopback_simulator.destroy_node()
-    rclpy.shutdown()
+    rclpy.try_shutdown()
     exit(0)
 
 

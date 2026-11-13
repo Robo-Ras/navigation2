@@ -18,7 +18,8 @@ import math
 from geometry_msgs.msg import Quaternion, Transform
 from nav_msgs.msg import OccupancyGrid
 import numpy as np
-import tf_transformations
+
+from . import transformations as tf_transformations
 
 """
 Transformation utilities for the loopback simulator

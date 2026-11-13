@@ -10,9 +10,13 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
-  <exec_depend>tf_transformations</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
-  <exec_depend>python3-transforms3d</exec_depend>
+  <!-- [Humble port] tf_transformations/transforms3d/nav2_simple_commander replaced by
+       nav2_loopback_sim/transformations.py and line_iterator.py (numpy only) -->
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>rosgraph_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
